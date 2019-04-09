@@ -72,6 +72,7 @@ Tabs Pushbutton | [lib/tabs_pushbutton.ex](lib/tabs_pushbutton.ex)
 Tabs Motion | [lib/tabs_motion.ex](lib/tabs_motion.ex)
 ZENNER Water Meter (v1.9) | [lib/zenner_water-meter.ex](lib/zenner_water-meter.ex)
 ZIS DHT22 Digital Temperature and Humidity Sensor Module | [lib/zis_dht-22.ex](lib/zis_dht-22.ex)
+ZIS Oskar | [lib/zis_oskar.ex](lib/zis_oskar.ex)
 ZIS SmartWaste UltraSonic | [lib/zis_smart-waste-ultrasonic.ex](lib/zis_smart-waste-ultrasonic.ex)
 ZIS ZISDIS 8 | [lib/zis_zisdis8.ex](lib/zis_zisdis8.ex)
 
