@@ -2,10 +2,12 @@ defmodule Parser do
   use Platform.Parsing.Behaviour
   require Logger
 
-  # ELEMENT IoT Parser for NKE Watteco IN'O
+  # ELEMENT IoT Parser for NKE Watteco IN'O and ModBus
   #
   # Link: http://www.nke-watteco.com/product/ino-lora-state-report-and-output-control-sensor/
-  # Documentation: http://support.nke-watteco.com/ino
+  # Documentation:
+  #   IN'O: http://support.nke-watteco.com/ino
+  #   ModBus: http://support.nke-watteco.com/modbus
   #
   # This parser tries to be compatible with this online payload parsing utility:
   #   http://support.nke-watteco.com/codec-online/
@@ -13,6 +15,7 @@ defmodule Parser do
   # Changelog
   #   2018-09-17 [jb]: Handling missing fctrl, added fields like "input_2_state" for better historgrams.
   #   2018-11-19 [jb]: Renamed fields according to NKE docs, see tests. Added parsing of cmdid, clusterid, attrid, attrtype.
+  #   2019-05-09 [gw]: Added support for ModBus device.
   #
 
 
@@ -20,7 +23,7 @@ defmodule Parser do
     frame_port = get_in(meta, [:meta, :frame_port])
     with {:ok, endpoint} <- fctrl_to_endppoint(fctrl),
          {:ok, cmd} <- parse_cmd(cmdid, clusterid, rest) do
-       Map.merge(%{endpoint: endpoint}, cmd)
+      Map.merge(%{endpoint: endpoint}, cmd)
     else
       error ->
         Logger.warn("NKE Parser with payload #{inspect payload} and frame_port #{inspect frame_port} failed with: #{inspect error}")
@@ -99,6 +102,38 @@ defmodule Parser do
     end
   end
 
+  # See: http://support.nke-watteco.com/serial-masterslave-protocol-cluster/
+  def parse_cmd(0x0A, 0x8007, <<0x0001::16, attr::binary>>) do
+    with {:ok, {attr_type, attr_value}} <- parse_attribute(attr) do
+      {
+        :ok, %{
+        report: "",
+        commandid: "",
+        clusterid: "",
+        attributeid: "",
+        attributetype: attr_type,
+        data: attr_value,
+      }
+      }
+    end
+  end
+
+  # See: http://support.nke-watteco.com/multi-masterslave-answers-cluster/
+  def parse_cmd(0x0A, 0x8009, <<0x0000::16, attr::binary>>) do
+    with {:ok, {attr_type, attr_value}} <- parse_attribute(attr) do
+      {
+        :ok, %{
+        report: "",
+        commandid: "",
+        clusterid: "",
+        attributeid: "",
+        attributetype: attr_type,
+        data: attr_value,
+      }
+      }
+    end
+  end
+
   def parse_cmd(_cmdid, _clusterid, _rest), do: {:error, :unknown_cmd}
 
 
@@ -144,7 +179,8 @@ defmodule Parser do
   # TODO: BITMAP8_TYPE
   # TODO: UINT8_ENUM
   # TODO: CHAR_STRING
-  # TODO: BYTES_STRING
+  # BYTES_STRING
+  def parse_attribute(<<0x41, val::binary>>), do: {:ok, {"ByteString", val}}
   # TODO: LONG_BYTES_STRING
   # TODO: STRUCTURE_ORDEREDSEQUENCE
   # TODO: SINGLE_TYPE
