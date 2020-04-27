@@ -5,7 +5,10 @@ defmodule Parser do
   # ELEMENT IoT Parser for SensoNeo Single Sensor
   # According to documentation provided by Sensoneo
   # Link: https://sensoneo.com/product/smart-sensors/
-
+  #
+  # REQUIRED Profile "sensoneo" with fields:
+  #   "distance_zero_percent": Integer, distance in cm from sensor if container is "empty"
+  #   "distance_hundred_percent": Integer, distance in cm from sensor if container is "full"
   #
   # Changelog
   #   2018-09-13 [as]: Initial version.
@@ -13,9 +16,48 @@ defmodule Parser do
   #   2019-09-06 [jb]: Added parsing catchall for unknown payloads.
   #   2019-10-10 [jb]: New implementation for <= v2 payloads.
   #   2019-10-11 [jb]: Supporting v3 payloads.
+  #   2020-04-22 [jb]: Added calculated ullage in % from configurable profile
   #
 
-  def parse(<<"(", _::binary>> = payload, %{meta: %{frame_port: 1}}) do
+  def ullage_distance_zero_percent(meta) do
+    get(
+      meta,
+      [:device, :fields, :sensoneo, :distance_zero_percent],
+      170 # max value the sensor can measure
+    )
+  end
+  def ullage_distance_hundred_percent(meta) do
+    get(
+      meta,
+      [:device, :fields, :sensoneo, :distance_hundred_percent],
+      3 # min value the sensor can measure
+    )
+  end
+
+  def preloads do
+    [device: [profile_data: [:profile]]]
+  end
+
+  def add_ullage(%{distance: distance} = row, meta) do
+    max = ullage_distance_zero_percent(meta)
+    min = ullage_distance_hundred_percent(meta)
+
+    Map.merge(row, %{ullage: calculate_ullage_percent(distance, min, max)})
+  end
+  def add_ullage(row, _meta), do: row
+
+  def calculate_ullage_percent(_distance, min, max) when min == max, do: 100
+  def calculate_ullage_percent(distance, min, max) do
+    # Move values from min to 0
+    distance = distance - min
+    max = max - min
+    # Calculate percentage
+    percent = (1 - (distance / max)) * 100
+    # Cap to 0..100 as integer
+    percent |> Kernel.min(100) |> Kernel.max(0) |> Kernel.trunc()
+  end
+
+  def parse(<<"(", _::binary>> = payload, %{meta: %{frame_port: 1}} = meta) do
     ~r/\(U([0-9.]+)T([0-9+-]+)D([0-9]+)P([0-9]+)\)/
     |> Regex.run(payload)
     |> case do
@@ -30,8 +72,9 @@ defmodule Parser do
         Logger.info("Sensoneo Parser: Unknown payload #{inspect payload}")
         []
     end
+    |> add_ullage(meta)
   end
-  def parse(<<0xFF, 0xFF, header::binary-2, sensor_id::32-little, events, sonar0, sonar1, sonar2, sonar3, voltage, temp, tilt, tx_events>>, %{meta: %{frame_port: 2}}) do
+  def parse(<<0xFF, 0xFF, header::binary-2, sensor_id::32-little, events, sonar0, sonar1, sonar2, sonar3, voltage, temp, tilt, tx_events>>, %{meta: %{frame_port: 2}} = meta) do
     # Dont know what `qs` is, not documented ...
     <<_qs::4, type::4, firmware::8>> = header
     type = case type do
@@ -65,6 +108,7 @@ defmodule Parser do
       tilt: tilt, # °
       tx_events: tx_events, # Number events
     })
+    |> add_ullage(meta)
   end
   def parse(payload, meta) do
     Logger.warn("Could not parse payload #{inspect payload} with frame_port #{inspect get_in(meta, [:meta, :frame_port])}")
@@ -86,6 +130,16 @@ defmodule Parser do
   def fields do
     [
       %{
+        field: "ullage",
+        display: "Ullage",
+        unit: "%"
+      },
+      %{
+        field: "distance",
+        display: "Distance",
+        unit: "cm"
+      },
+      %{
         field: "voltage",
         display: "Voltage",
         unit: "V"
@@ -94,11 +148,6 @@ defmodule Parser do
         field: "temperature",
         display: "Temperature",
         unit: "°C"
-      },
-      %{
-        field: "distance",
-        display: "Distance",
-        unit: "cm"
       },
       %{
         field: "position",
@@ -139,12 +188,7 @@ defmodule Parser do
         :parse_hex,
         "2855332E3736542B313444323531503129",
         %{meta: %{frame_port: 1}},
-        %{
-          distance: 251,
-          position: "normal",
-          temperature: 14,
-          voltage: 3.76
-        }
+        %{distance: 251, position: "normal", temperature: 14, ullage: 0, voltage: 3.76}
       },
 
       # Version 3
@@ -165,6 +209,40 @@ defmodule Parser do
           tilt: 50,
           tx_events: 93,
           type: :standalone,
+          ullage: 0,
+          voltage: 3.59
+        }
+      },
+
+      # Version 3 with profile
+      {
+        :parse_hex,
+        "FFFF22B39C00907001101010106D15325D",
+        %{
+          meta: %{frame_port: 2},
+          device: %{
+            fields: %{
+              sensoneo: %{
+                distance_zero_percent: 10,
+                distance_hundred_percent: 100,
+              }
+            }
+          }
+        },
+        %{
+          distance: 32.0,
+          event_measurement_ended: 1,
+          firmware: 179,
+          sensor_id: 1888485532,
+          sonar_0: 32,
+          sonar_1: 32,
+          sonar_2: 32,
+          sonar_3: 32,
+          temperature: 21,
+          tilt: 50,
+          tx_events: 93,
+          type: :standalone,
+          ullage: 24,
           voltage: 3.59
         }
       },
